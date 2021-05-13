@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------
-# Copyright (c) 2016, 2020, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2016, 2021 Oracle and/or its affiliates. All rights reserved.
 #
 # Portions Copyright 2007-2015, Anthony Tuininga. All rights reserved.
 #
@@ -14,6 +14,7 @@
 import test_env
 import cx_Oracle as oracledb
 import decimal
+import datetime
 
 class TestCase(test_env.BaseTestCase):
 
@@ -605,8 +606,8 @@ class TestCase(test_env.BaseTestCase):
         self.assertEqual(cursor.fetchraw(), 10)
         self.assertEqual(cursor.fetchvars[0].getvalue(), 38)
 
-    def test_1254_parse(self):
-        "1254 - test parsing statements"
+    def test_1254_parse_query(self):
+        "1254 - test parsing query statements"
         sql = "select LongIntCol from TestNumbers where IntCol = :val"
         self.cursor.parse(sql)
         self.assertEqual(self.cursor.statement, sql)
@@ -811,11 +812,11 @@ class TestCase(test_env.BaseTestCase):
         # create refcursor and execute stored procedure
         with self.connection.cursor() as cursor:
             refcursor = self.connection.cursor()
-            refcursor.prefetchrows = 300
-            refcursor.arraysize = 300
+            refcursor.prefetchrows = 150
+            refcursor.arraysize = 50
             cursor.callproc("myrefcursorproc", [refcursor])
             refcursor.fetchall()
-            self.assertRoundTrips(2)
+            self.assertRoundTrips(4)
 
     def test_1267_existing_cursor_prefetchrows(self):
         "1267 - test prefetch rows using existing cursor"
@@ -932,6 +933,73 @@ class TestCase(test_env.BaseTestCase):
                           statement, value=var)
         self.assertRaises(oracledb.DatabaseError, self.cursor.execute,
                           statement, value=var, value2=var, value3=var)
+
+    def test_1279_change_in_size_on_successive_bind(self):
+        "1279 - change in size on subsequent binds does not use optimised path"
+        self.cursor.execute("truncate table TestTempTable")
+        data = [
+            (1, "Test String #1"),
+            (2, "ABC" * 100)
+        ]
+        sql = "insert into TestTempTable (IntCol, StringCol) values (:1, :2)"
+        for row in data:
+            self.cursor.execute(sql, row)
+        self.connection.commit()
+        self.cursor.execute("select IntCol, StringCol from TestTempTable")
+        self.assertEqual(self.cursor.fetchall(), data)
+
+    def test_1280_change_in_type_on_successive_bind(self):
+        "1280 - change in type on subsequent binds cannot use optimised path"
+        sql = "select :1 from dual"
+        self.cursor.execute(sql, ('W',))
+        row, = self.cursor.fetchone()
+        self.assertEqual(row, 'W')
+        self.cursor.execute(sql, ('S',))
+        row, = self.cursor.fetchone()
+        self.assertEqual(row, 'S')
+        self.cursor.execute(sql, (7,))
+        row, = self.cursor.fetchone()
+        self.assertEqual(row, '7')
+
+    def test_1281_dml_can_use_optimised_path(self):
+        "1281 - test that dml can use optimised path"
+        data_to_insert = [
+            (1, "Test String #1"),
+            (2, "Test String #2"),
+            (3, "Test String #3")
+        ]
+        self.cursor.execute("truncate table TestTempTable")
+        sql = "insert into TestTempTable (IntCol, StringCol) values (:1, :2)"
+        for row in data_to_insert:
+            with self.connection.cursor() as cursor:
+                cursor.execute(sql, row)
+        self.connection.commit()
+        self.cursor.execute("""
+                select IntCol, StringCol
+                from TestTempTable
+                order by IntCol""")
+        self.assertEqual(self.cursor.fetchall(), data_to_insert)
+
+    def test_1282_parse_plsql(self):
+        "1282 - test parsing plsql statements"
+        sql = "begin :value := 5; end;"
+        self.cursor.parse(sql)
+        self.assertEqual(self.cursor.statement, sql)
+        self.assertEqual(self.cursor.description, None)
+
+    def test_1283_parse_ddl(self):
+        "1283 - test parsing ddl statements"
+        sql = "truncate table TestTempTable"
+        self.cursor.parse(sql)
+        self.assertEqual(self.cursor.statement, sql)
+        self.assertEqual(self.cursor.description, None)
+
+    def test_1284_parse_dml(self):
+        "1284 - test parsing dml statements"
+        sql = "insert into TestTempTable (IntCol) values (1)"
+        self.cursor.parse(sql)
+        self.assertEqual(self.cursor.statement, sql)
+        self.assertEqual(self.cursor.description, None)
 
 if __name__ == "__main__":
     test_env.run_test_cases()

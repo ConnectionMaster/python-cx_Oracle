@@ -52,7 +52,7 @@ Cursor Object
         The DB API definition does not define this attribute.
 
 
-.. method:: Cursor.arrayvar(dataType, value, [size])
+.. method:: Cursor.arrayvar(typ, value, [size])
 
     Create an array variable associated with the cursor of the given type and
     size and return a :ref:`variable object <varobj>`. The value is either an
@@ -68,7 +68,7 @@ Cursor Object
     contiguous keys. For PL/SQL associative arrays with sparsely populated keys
     or for varrays and nested tables, the approach shown in this
     `example <https://github.com/oracle/python-cx_Oracle/blob/master/
-    samples/PLSQLCollection.py>`__ needs to be used.
+    samples/plsql_collection.py>`__ needs to be used.
 
     .. note::
 
@@ -99,7 +99,7 @@ Cursor Object
 
 
 .. method:: Cursor.callfunc(name, returnType, parameters=[], \
-        keywordParameters={})
+        keyword_parameters={})
 
     Call a function with the given name. The return type is specified in the
     same notation as is required by :meth:`~Cursor.setinputsizes()`. The
@@ -109,6 +109,13 @@ Cursor Object
     function.
 
     See :ref:`plsqlfunc` for an example.
+
+    .. versionchanged:: 8.2
+
+        For consistency and compliance with the PEP 8 naming style, the
+        parameter `keywordParameters` was renamed to `keyword_parameters`. The
+        old name will continue to work as a keyword parameter for a period of
+        time.
 
     .. note::
 
@@ -121,7 +128,7 @@ Cursor Object
         parameter list refers to the return value of the function.
 
 
-.. method:: Cursor.callproc(name, parameters=[], keywordParameters={})
+.. method:: Cursor.callproc(name, parameters=[], keyword_parameters={})
 
     Call a procedure with the given name. The sequence of parameters must
     contain one entry for each parameter that the procedure expects. The result
@@ -131,6 +138,13 @@ Cursor Object
     positional parameters and are not returned as part of the output sequence.
 
     See :ref:`plsqlproc` for an example.
+
+    .. versionchanged:: 8.2
+
+        For consistency and compliance with the PEP 8 naming style, the
+        parameter `keywordParameters` was renamed to `keyword_parameters`. The
+        old name will continue to work as a keyword parameter for a period of
+        time.
 
     .. note::
 
@@ -167,7 +181,7 @@ Cursor Object
     defined at the module level.
 
 
-.. method:: Cursor.execute(statement, [parameters], \*\*keywordParameters)
+.. method:: Cursor.execute(statement, parameters=[], ** keyword_parameters)
 
     Execute a statement against the database.  See :ref:`sqlexecution`.
 
@@ -245,7 +259,7 @@ Cursor Object
     a TypeError exception.
 
 
-.. method:: Cursor.executemanyprepared(numIters)
+.. method:: Cursor.executemanyprepared(num_iters)
 
     Execute the previously prepared and bound statement the given number of
     times.  The variables that are bound must have already been set to their
@@ -276,7 +290,7 @@ Cursor Object
     See :ref:`fetching` for an example.
 
 
-.. method:: Cursor.fetchmany([numRows=cursor.arraysize])
+.. method:: Cursor.fetchmany(num_rows=cursor.arraysize)
 
     Fetch the next set of rows of a query result, returning a list of tuples.
     An empty list is returned if no more rows are available. Note that the
@@ -302,16 +316,18 @@ Cursor Object
 
     See :ref:`fetching` for an example.
 
-.. method:: Cursor.fetchraw([numRows=cursor.arraysize])
+.. method:: Cursor.fetchraw(num_rows=cursor.arraysize)
 
     Fetch the next set of rows of a query result into the internal buffers of
     the defined variables for the cursor. The number of rows actually fetched
-    is returned.  This method was designed for the case where optimal
-    performance is required as it comes at the expense of compatibility with
-    the DB API.
+    is returned.
 
     An exception is raised if the previous call to :meth:`~Cursor.execute()`
     did not produce any result set or no call was issued yet.
+
+    .. deprecated:: 8.2
+
+        Use :meth:`Cursor.fetchmany()` instead.
 
     .. note::
 
@@ -571,19 +587,19 @@ Cursor Object
         The DB API definition does not define this attribute.
 
 
-.. method:: Cursor.var(dataType, [size, arraysize, inconverter, outconverter, \
-        typename, encodingErrors])
+.. method:: Cursor.var(typ, [size, arraysize, inconverter, outconverter, \
+        typename, encoding_errors, bypass_decode])
 
     Create a variable with the specified characteristics. This method was
     designed for use with PL/SQL in/out variables where the length or type
     cannot be determined automatically from the Python object passed in or for
     use in input and output type handlers defined on cursors or connections.
 
-    The dataType parameter specifies the type of data that should be stored in
-    the variable. This should be one of the
-    :ref:`database type constants <dbtypes>`, :ref:`DB API constants <types>`,
-    an object type returned from the method :meth:`Connection.gettype()` or one
-    of the following Python types:
+    The typ parameter specifies the type of data that should be stored in the
+    variable. This should be one of the :ref:`database type constants
+    <dbtypes>`, :ref:`DB API constants <types>`, an object type returned from
+    the method :meth:`Connection.gettype()` or one of the following Python
+    types:
 
     .. list-table::
         :header-rows: 1
@@ -626,11 +642,29 @@ Cursor Object
     specified when using type :data:`cx_Oracle.OBJECT` unless the type object
     was passed directly as the first parameter.
 
-    The encodingErrors parameter specifies what should happen when decoding
+    The encoding_errors parameter specifies what should happen when decoding
     byte strings fetched from the database into strings. It should be one of
     the values noted in the builtin
     `decode <https://docs.python.org/3/library/stdtypes.html#bytes.decode>`__
     function.
+
+    The bypass_decode parameter, if specified, should be passed as a
+    boolean value. Passing a `True` value causes values of database types
+    :data:`~cx_Oracle.DB_TYPE_VARCHAR`, :data:`~cx_Oracle.DB_TYPE_CHAR`,
+    :data:`~cx_Oracle.DB_TYPE_NVARCHAR`, :data:`~cx_Oracle.DB_TYPE_NCHAR` and
+    :data:`~cx_Oracle.DB_TYPE_LONG` to be returned as `bytes` instead of `str`,
+    meaning that cx_Oracle doesn't do any decoding. See :ref:`Fetching raw
+    data <fetching-raw-data>` for more information.
+
+    .. versionadded:: 8.2
+
+        The parameter `bypass_decode` was added.
+
+    .. versionchanged:: 8.2
+
+        For consistency and compliance with the PEP 8 naming style, the
+        parameter `encodingErrors` was renamed to `encoding_errors`. The old
+        name will continue to work as a keyword parameter for a period of time.
 
     .. note::
 

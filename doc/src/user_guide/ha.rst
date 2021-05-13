@@ -108,7 +108,7 @@ when the database restarts.
 
 For a more information on FAN see the `white paper on Fast Application
 Notification
-<http://www.oracle.com/technetwork/database/options/clustering/applicationcontinuity/learnmore/fastapplicationnotification12c-2538999.pdf>`__.
+<https://www.oracle.com/technetwork/database/options/clustering/applicationcontinuity/learnmore/fastapplicationnotification12c-2538999.pdf>`__.
 
 .. _appcont:
 
@@ -213,4 +213,4 @@ In the Python application code:
 
 See the `Transaction Guard Sample
 <https://github.com/oracle/python-cx_Oracle/blob/master/
-samples/TransactionGuard.py>`__ for further details.
+samples/transaction_guard.py>`__ for further details.

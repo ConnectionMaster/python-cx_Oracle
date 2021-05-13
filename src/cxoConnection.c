@@ -467,14 +467,15 @@ static int cxoConnection_splitComponent(PyObject *sourceObj,
 static int cxoConnection_init(cxoConnection *conn, PyObject *args,
         PyObject *keywordArgs)
 {
-    PyObject *tagObj, *matchAnyTagObj, *threadedObj, *eventsObj, *contextObj;
     PyObject *usernameObj, *passwordObj, *dsnObj, *cclassObj, *editionObj;
+    int status, temp, invokeSessionCallback, threaded, events;
     PyObject *shardingKeyObj, *superShardingKeyObj, *tempObj;
-    int status, temp, invokeSessionCallback;
     PyObject *beforePartObj, *afterPartObj;
     dpiCommonCreateParams dpiCommonParams;
     dpiConnCreateParams dpiCreateParams;
     unsigned long long externalHandle;
+    PyObject *tagObj, *contextObj;
+    unsigned int stmtCacheSize;
     cxoConnectionParams params;
     PyObject *newPasswordObj;
     cxoSessionPool *pool;
@@ -483,15 +484,18 @@ static int cxoConnection_init(cxoConnection *conn, PyObject *args,
     static char *keywordList[] = { "user", "password", "dsn", "mode",
             "handle", "pool", "threaded", "events", "cclass", "purity",
             "newpassword", "encoding", "nencoding", "edition", "appcontext",
-            "tag", "matchanytag", "shardingkey", "supershardingkey", NULL };
+            "tag", "matchanytag", "shardingkey", "supershardingkey",
+            "stmtcachesize", NULL };
 
     // parse arguments
     pool = NULL;
     tagObj = Py_None;
+    threaded = 0;
     externalHandle = 0;
+    newPasswordObj = usernameObj = NULL;
     passwordObj = dsnObj = cclassObj = editionObj = NULL;
-    threadedObj = eventsObj = newPasswordObj = usernameObj = NULL;
-    matchAnyTagObj = contextObj = shardingKeyObj = superShardingKeyObj = NULL;
+    contextObj = shardingKeyObj = superShardingKeyObj = NULL;
+    stmtCacheSize = DPI_DEFAULT_STMT_CACHE_SIZE;
     if (cxoUtils_initializeDPI(NULL) < 0)
         return -1;
     if (dpiContext_initCommonCreateParams(cxoDpiContext, &dpiCommonParams) < 0)
@@ -499,26 +503,19 @@ static int cxoConnection_init(cxoConnection *conn, PyObject *args,
     if (dpiContext_initConnCreateParams(cxoDpiContext, &dpiCreateParams) < 0)
         return cxoError_raiseAndReturnInt();
     if (!PyArg_ParseTupleAndKeywords(args, keywordArgs,
-            "|OOOiKO!OOOiOssOOOOOO", keywordList, &usernameObj, &passwordObj,
+            "|OOOiKO!ppOiOssOOOpOOI", keywordList, &usernameObj, &passwordObj,
             &dsnObj, &dpiCreateParams.authMode, &externalHandle,
-            &cxoPyTypeSessionPool, &pool, &threadedObj, &eventsObj, &cclassObj,
+            &cxoPyTypeSessionPool, &pool, &threaded, &events, &cclassObj,
             &dpiCreateParams.purity, &newPasswordObj,
             &dpiCommonParams.encoding, &dpiCommonParams.nencoding, &editionObj,
-            &contextObj, &tagObj, &matchAnyTagObj, &shardingKeyObj,
-            &superShardingKeyObj))
+            &contextObj, &tagObj, &dpiCreateParams.matchAnyTag,
+            &shardingKeyObj, &superShardingKeyObj, &stmtCacheSize))
         return -1;
     dpiCreateParams.externalHandle = (void*) externalHandle;
-    if (cxoUtils_getBooleanValue(threadedObj, 0, &temp) < 0)
-        return -1;
-    if (temp)
+    if (threaded)
         dpiCommonParams.createMode |= DPI_MODE_CREATE_THREADED;
-    if (cxoUtils_getBooleanValue(eventsObj, 0, &temp) < 0)
-        return -1;
-    if (temp)
+    if (events)
         dpiCommonParams.createMode |= DPI_MODE_CREATE_EVENTS;
-    if (cxoUtils_getBooleanValue(matchAnyTagObj, 0,
-            &dpiCreateParams.matchAnyTag) < 0)
-        return -1;
 
     // keep a copy of the user name and connect string (DSN)
     Py_XINCREF(usernameObj);
@@ -593,6 +590,7 @@ static int cxoConnection_init(cxoConnection *conn, PyObject *args,
     dpiCreateParams.newPasswordLength = params.newPasswordBuffer.size;
     dpiCommonParams.edition = params.editionBuffer.ptr;
     dpiCommonParams.editionLength = params.editionBuffer.size;
+    dpiCommonParams.stmtCacheSize = stmtCacheSize;
     dpiCreateParams.tag = params.tagBuffer.ptr;
     dpiCreateParams.tagLength = params.tagBuffer.size;
     dpiCreateParams.appContext = params.appContext;
@@ -1348,8 +1346,9 @@ static PyObject *cxoConnection_enqueue(cxoConnection *conn, PyObject* args,
 static PyObject *cxoConnection_queue(cxoConnection *conn, PyObject* args,
         PyObject* keywordArgs)
 {
-    static char *keywordList[] = { "name", "payloadType", NULL };
-    cxoObjectType *typeObj;
+    static char *keywordList[] = { "name", "payload_type", "payloadType",
+            NULL };
+    cxoObjectType *typeObj, *deprecatedTypeObj;
     cxoBuffer nameBuffer;
     PyObject *nameObj;
     dpiQueue *handle;
@@ -1357,12 +1356,21 @@ static PyObject *cxoConnection_queue(cxoConnection *conn, PyObject* args,
     int status;
 
     // parse arguments
-    typeObj = NULL;
-    if (!PyArg_ParseTupleAndKeywords(args, keywordArgs, "O|O!", keywordList,
-            &nameObj, &cxoPyTypeObjectType, &typeObj))
+    typeObj = deprecatedTypeObj = NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, keywordArgs, "O|O!O!", keywordList,
+            &nameObj, &cxoPyTypeObjectType, &typeObj, &cxoPyTypeObjectType,
+            &deprecatedTypeObj))
         return NULL;
     if (cxoConnection_isConnected(conn) < 0)
         return NULL;
+    if (deprecatedTypeObj) {
+        if (typeObj) {
+            cxoError_raiseFromString(cxoProgrammingErrorException,
+                    "payload_type and payloadType cannot both be specified");
+            return NULL;
+        }
+        typeObj = deprecatedTypeObj;
+    }
     if (cxoBuffer_fromObject(&nameBuffer, nameObj,
             conn->encodingInfo.encoding) < 0)
         return NULL;
@@ -1480,26 +1488,22 @@ static PyObject *cxoConnection_startup(cxoConnection *conn, PyObject* args,
         PyObject* keywordArgs)
 {
     static char *keywordList[] = { "force", "restrict", "pfile", NULL };
-    PyObject *forceObj, *restrictObj, *pfileObj;
+    int temp, force, restrictStartup;
     cxoBuffer pfileBuffer;
     dpiStartupMode mode;
-    int temp;
+    PyObject *pfileObj;
 
     // parse arguments
-    forceObj = restrictObj = pfileObj = NULL;
-    if (!PyArg_ParseTupleAndKeywords(args, keywordArgs, "|OOO", keywordList,
-            &forceObj, &restrictObj, &pfileObj))
+    pfileObj = NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, keywordArgs, "|ppO", keywordList,
+            &force, &restrictStartup, &pfileObj))
         return NULL;
 
     // set the flags to use during startup
     mode = DPI_MODE_STARTUP_DEFAULT;
-    if (cxoUtils_getBooleanValue(forceObj, 0, &temp) < 0)
-        return NULL;
-    if (temp)
+    if (force)
         mode |= DPI_MODE_STARTUP_FORCE;
-    if (cxoUtils_getBooleanValue(restrictObj, 0, &temp) < 0)
-        return NULL;
-    if (temp)
+    if (restrictStartup)
         mode |= DPI_MODE_STARTUP_RESTRICT;
 
     // check the pfile parameter
@@ -1532,11 +1536,15 @@ static PyObject *cxoConnection_subscribe(cxoConnection *conn, PyObject* args,
         PyObject* keywordArgs)
 {
     static char *keywordList[] = { "namespace", "protocol", "callback",
-            "timeout", "operations", "port", "qos", "ipAddress",
-            "groupingClass", "groupingValue", "groupingType", "name",
-            "clientInitiated", NULL };
-    PyObject *callback, *ipAddress, *name, *clientInitiatedObj;
+            "timeout", "operations", "port", "qos", "ip_address",
+            "grouping_class", "grouping_value", "grouping_type", "name",
+            "client_initiated", "ipAddress", "groupingClass", "groupingValue",
+            "groupingType", "clientInitiated", NULL };
+    PyObject *callback, *ipAddress, *ipAddressDeprecated, *name;
+    uint8_t groupingClassDeprecated, groupingTypeDeprecated;
     cxoBuffer ipAddressBuffer, nameBuffer;
+    uint32_t groupingValueDeprecated;
+    int clientInitiatedDeprecated;
     dpiSubscrCreateParams params;
     cxoSubscr *subscr;
 
@@ -1545,19 +1553,67 @@ static PyObject *cxoConnection_subscribe(cxoConnection *conn, PyObject* args,
         return cxoError_raiseAndReturnNull();
 
     // validate parameters
-    callback = name = ipAddress = clientInitiatedObj = NULL;
-    if (!PyArg_ParseTupleAndKeywords(args, keywordArgs, "|IIOIIIIObIbOO",
+    groupingValueDeprecated = 0;
+    clientInitiatedDeprecated = 0;
+    groupingClassDeprecated = groupingTypeDeprecated = 0;
+    callback = name = ipAddress = ipAddressDeprecated = NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, keywordArgs, "|IIOIIIIObIbOpObIbp",
             keywordList, &params.subscrNamespace, &params.protocol, &callback,
             &params.timeout, &params.operations, &params.portNumber,
             &params.qos, &ipAddress, &params.groupingClass,
             &params.groupingValue, &params.groupingType, &name,
-            &clientInitiatedObj))
+            &params.clientInitiated, &ipAddressDeprecated,
+            &groupingClassDeprecated, &groupingValueDeprecated,
+            &groupingTypeDeprecated, &clientInitiatedDeprecated))
         return NULL;
     if (cxoConnection_isConnected(conn) < 0)
         return NULL;
-    if (cxoUtils_getBooleanValue(clientInitiatedObj, 0,
-            &params.clientInitiated) < 0)
-        return NULL;
+
+    // check duplicate parameters to ensure that both are not specified
+    if (ipAddressDeprecated) {
+        if (ipAddress) {
+            cxoError_raiseFromString(cxoProgrammingErrorException,
+                    "ip_address and ipAddress cannot both be specified");
+            return NULL;
+        }
+        ipAddress = ipAddressDeprecated;
+    }
+    if (groupingClassDeprecated != 0) {
+        if (params.groupingClass != 0) {
+            cxoError_raiseFromString(cxoProgrammingErrorException,
+                    "grouping_class and groupingClass cannot both be "
+                    "specified");
+            return NULL;
+        }
+        params.groupingClass = groupingClassDeprecated;
+    }
+    if (groupingValueDeprecated != 0) {
+        if (params.groupingValue != 0) {
+            cxoError_raiseFromString(cxoProgrammingErrorException,
+                    "grouping_value and groupingValue cannot both be "
+                    "specified");
+            return NULL;
+        }
+        params.groupingValue = groupingValueDeprecated;
+    }
+    if (groupingTypeDeprecated != 0) {
+        if (params.groupingType != 0) {
+            cxoError_raiseFromString(cxoProgrammingErrorException,
+                    "grouping_type and groupingType cannot both be "
+                    "specified");
+            return NULL;
+        }
+        params.groupingType = groupingTypeDeprecated;
+    }
+    if (clientInitiatedDeprecated != 0) {
+        if (params.clientInitiated != 0) {
+            cxoError_raiseFromString(cxoProgrammingErrorException,
+                    "client_initiated and clientInitiated cannot both be "
+                    "specified");
+            return NULL;
+        }
+        params.clientInitiated = clientInitiatedDeprecated;
+    }
 
     // populate IP address in parameters, if applicable
     cxoBuffer_init(&ipAddressBuffer);
@@ -1964,7 +2020,7 @@ static PyGetSetDef cxoCalcMembers[] = {
     { "version", (getter) cxoConnection_getVersion, 0, 0, 0 },
     { "encoding", (getter) cxoConnection_getEncoding, 0, 0, 0 },
     { "nencoding", (getter) cxoConnection_getNationalEncoding, 0, 0, 0 },
-    { "callTimeout", (getter) cxoConnection_getCallTimeout,
+    { "call_timeout", (getter) cxoConnection_getCallTimeout,
             (setter) cxoConnection_setCallTimeout, 0, 0 },
     { "maxBytesPerCharacter", (getter) cxoConnection_getMaxBytesPerCharacter,
             0, 0, 0 },
@@ -2005,6 +2061,8 @@ static PyGetSetDef cxoCalcMembers[] = {
             &cxoDataErrorException },
     { "NotSupportedError", (getter) cxoConnection_getException, NULL, NULL,
             &cxoNotSupportedErrorException },
+    { "callTimeout", (getter) cxoConnection_getCallTimeout,
+            (setter) cxoConnection_setCallTimeout, 0, 0 },
     { NULL }
 };
 

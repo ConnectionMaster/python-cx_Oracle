@@ -34,15 +34,12 @@ static int cxoCursor_init(cxoCursor *cursor, PyObject *args,
 {
     static char *keywordList[] = { "connection", "scrollable", NULL };
     cxoConnection *connection;
-    PyObject *scrollableObj;
     int isScrollable;
 
     // parse arguments
-    scrollableObj = NULL;
-    if (!PyArg_ParseTupleAndKeywords(args, keywordArgs, "O!|O", keywordList,
-            &cxoPyTypeConnection, &connection, &scrollableObj))
-        return -1;
-    if (cxoUtils_getBooleanValue(scrollableObj, 0, &isScrollable) < 0)
+    isScrollable = 0;
+    if (!PyArg_ParseTupleAndKeywords(args, keywordArgs, "O!|p", keywordList,
+            &cxoPyTypeConnection, &connection, &isScrollable))
         return -1;
     cursor->isScrollable = (char) isScrollable;
 
@@ -1212,15 +1209,26 @@ static PyObject *cxoCursor_callFunc(cxoCursor *cursor, PyObject *args,
         PyObject *keywordArgs)
 {
     static char *keywordList[] = { "name", "returnType", "parameters",
-            "keywordParameters", NULL };
-    PyObject *listOfArguments, *keywordArguments, *returnType, *results, *name;
+            "keyword_parameters", "keywordParameters", NULL };
+    PyObject *listOfArguments, *keywordArguments, *keywordArgumentsDeprecated;
+    PyObject *returnType, *results, *name;
     cxoVar *var;
 
     // parse arguments
-    listOfArguments = keywordArguments = NULL;
-    if (!PyArg_ParseTupleAndKeywords(args, keywordArgs, "OO|OO", keywordList,
-            &name, &returnType, &listOfArguments, &keywordArguments))
+    listOfArguments = keywordArguments = keywordArgumentsDeprecated = NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, keywordArgs, "OO|OOO", keywordList,
+            &name, &returnType, &listOfArguments, &keywordArguments,
+            &keywordArgumentsDeprecated))
         return NULL;
+    if (keywordArgumentsDeprecated) {
+        if (keywordArguments) {
+            cxoError_raiseFromString(cxoProgrammingErrorException,
+                    "keyword_parameters and keywordParameters cannot both be "
+                    "specified");
+            return NULL;
+        }
+        keywordArguments = keywordArgumentsDeprecated;
+    }
 
     // create the return variable
     var = cxoVar_newByType(cursor, returnType, 1);
@@ -1246,16 +1254,26 @@ static PyObject *cxoCursor_callFunc(cxoCursor *cursor, PyObject *args,
 static PyObject *cxoCursor_callProc(cxoCursor *cursor, PyObject *args,
         PyObject *keywordArgs)
 {
-    static char *keywordList[] = { "name", "parameters", "keywordParameters",
-            NULL };
-    PyObject *listOfArguments, *keywordArguments, *results, *var, *temp, *name;
+    static char *keywordList[] = { "name", "parameters",
+            "keyword_parameters", "keywordParameters", NULL };
+    PyObject *listOfArguments, *keywordArguments, *keywordArgumentsDeprecated;
+    PyObject *results, *var, *temp, *name;
     Py_ssize_t numArgs, i;
 
     // parse arguments
-    listOfArguments = keywordArguments = NULL;
-    if (!PyArg_ParseTupleAndKeywords(args, keywordArgs, "O|OO", keywordList,
+    listOfArguments = keywordArguments = keywordArgumentsDeprecated = NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, keywordArgs, "O|OOO", keywordList,
             &name, &listOfArguments, &keywordArguments))
         return NULL;
+    if (keywordArgumentsDeprecated) {
+        if (keywordArguments) {
+            cxoError_raiseFromString(cxoProgrammingErrorException,
+                    "keyword_parameters and keywordParameters cannot both be "
+                    "specified");
+            return NULL;
+        }
+        keywordArguments = keywordArgumentsDeprecated;
+    }
 
     // call the stored procedure
     if (cxoCursor_call(cursor, NULL, name, listOfArguments,
@@ -1791,27 +1809,39 @@ static PyObject *cxoCursor_setOutputSize(cxoCursor *cursor, PyObject *args)
 static PyObject *cxoCursor_var(cxoCursor *cursor, PyObject *args,
         PyObject *keywordArgs)
 {
-    static char *keywordList[] = { "type", "size", "arraysize",
-            "inconverter", "outconverter", "typename", "encodingErrors",
-            NULL };
+    static char *keywordList[] = { "typ", "size", "arraysize", "inconverter",
+            "outconverter", "typename", "encoding_errors", "bypass_decode",
+            "encodingErrors", NULL };
+    Py_ssize_t encodingErrorsLength, encodingErrorsDeprecatedLength;
+    const char *encodingErrors, *encodingErrorsDeprecated;
     PyObject *inConverter, *outConverter, *typeNameObj;
-    Py_ssize_t encodingErrorsLength;
+    int size, arraySize, bypassDecode;
     cxoTransformNum transformNum;
-    const char *encodingErrors;
     cxoObjectType *objType;
-    int size, arraySize;
     PyObject *type;
     cxoVar *var;
 
     // parse arguments
-    size = 0;
-    encodingErrors = NULL;
+    size = bypassDecode = 0;
     arraySize = cursor->bindArraySize;
+    encodingErrors = encodingErrorsDeprecated = NULL;
     inConverter = outConverter = typeNameObj = NULL;
-    if (!PyArg_ParseTupleAndKeywords(args, keywordArgs, "O|iiOOOz#",
+    if (!PyArg_ParseTupleAndKeywords(args, keywordArgs, "O|iiOOOz#pz#",
             keywordList, &type, &size, &arraySize, &inConverter, &outConverter,
-            &typeNameObj, &encodingErrors, &encodingErrorsLength))
+            &typeNameObj, &encodingErrors, &encodingErrorsLength,
+            &bypassDecode, &encodingErrorsDeprecated,
+            &encodingErrorsDeprecatedLength))
         return NULL;
+    if (encodingErrorsDeprecated) {
+        if (encodingErrors) {
+            cxoError_raiseFromString(cxoProgrammingErrorException,
+                    "encoding_errors and encodingErrors cannot both be "
+                    "specified");
+            return NULL;
+        }
+        encodingErrors = encodingErrorsDeprecated;
+        encodingErrorsLength = encodingErrorsDeprecatedLength;
+    }
 
     // determine the type of variable
     if (cxoTransform_getNumFromType(type, &transformNum, &objType) < 0)
@@ -1842,6 +1872,10 @@ static PyObject *cxoCursor_var(cxoCursor *cursor, PyObject *args,
         }
         strcpy((char*) var->encodingErrors, encodingErrors);
     }
+
+    // if the decode step is to be bypassed, use the binary transform instead
+    if (bypassDecode)
+        var->transformNum = CXO_TRANSFORM_BINARY;
 
     return (PyObject*) var;
 }

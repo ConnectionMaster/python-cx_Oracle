@@ -41,7 +41,9 @@ SessionPool Object
 
     The shardingkey and supershardingkey parameters, if specified, are expected
     to be a sequence of values which will be used to identify the database
-    shard to connect to.  The key values can be strings, numbers, bytes or dates.
+    shard to connect to.  The key values can be strings, numbers, bytes or
+    dates.
+
 
 .. attribute:: SessionPool.busy
 
@@ -99,8 +101,6 @@ SessionPool Object
     session may exist. This attribute is only available in Oracle Database
     12.1.
 
-
-
     .. versionadded:: 5.3
 
 
@@ -121,6 +121,23 @@ SessionPool Object
 
     This read-only attribute returns the number of sessions currently opened by
     the session pool.
+
+
+.. attribute:: SessionPool.ping_interval
+
+    This read-write integer attribute specifies the pool ping interval in
+    seconds. When a connection is acquired from the pool, a check is first made
+    to see how long it has been since the connection was put into the pool. If
+    this idle time exceeds ``ping_interval``, then a :ref:`round-trip <roundtrips>`
+    ping to the database is performed. If the connection is unusable, it is
+    discarded and a different connection is selected to be returned by
+    :meth:`SessionPool.acquire()`.  Setting ``ping_interval`` to a negative
+    value disables pinging.  Setting it to 0 forces a ping for every
+    ``aquire()`` and is not recommended.
+
+    Prior to cx_Oracle 8.2, the ping interval was fixed at 60 seconds.
+
+    .. versionadded:: 8.2
 
 
 .. method:: SessionPool.release(connection, tag=None)
@@ -146,13 +163,23 @@ SessionPool Object
     back to the pool.
 
 
+.. attribute:: SessionPool.soda_metadata_cache
+
+    This read-write boolean attribute returns whether the SODA metadata cache
+    is enabled or not. Enabling the cache significantly improves the
+    performance of methods :meth:`SodaDatabase.createCollection()` (when not
+    specifying a value for the metadata parameter) and
+    :meth:`SodaDatabase.openCollection()`. Note that the cache can become out
+    of date if changes to the metadata of cached collections are made
+    externally.
+
+    .. versionadded:: 8.2
+
+
 .. attribute:: SessionPool.stmtcachesize
 
     This read-write attribute specifies the size of the statement cache that
-    will be used as the starting point for any connections that are created by
-    the session pool. Once a connection is created, that connection's statement
-    cache size can only be changed by setting the
-    :attr:`Connection.stmtcachesize` attribute on the connection itself.
+    will be used for connections obtained from the pool.
 
     See :ref:`Statement Caching <stmtcache>` for more information.
 
@@ -171,6 +198,10 @@ SessionPool Object
 
     This read-only attribute returns the TNS entry of the database to which a
     connection has been established.
+
+    .. deprecated:: 8.2
+
+        Use the attribute :attr:`~SessionPool.dsn` instead.
 
 
 .. attribute:: SessionPool.username
